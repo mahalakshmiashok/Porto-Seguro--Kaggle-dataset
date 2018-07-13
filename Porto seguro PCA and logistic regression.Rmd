@@ -1,0 +1,331 @@
+---
+title: "Porto seguro PCA and logistic regression"
+output: html_document
+---
+#Porto Seguro Safe driver prediction
+
+#Predict the probability that an auto insurance policy holder files a claim.
+#Values of -1 indicate that the feature was missing from the observation. The target columns signifies whether #or not a claim was filed for that policy holder.
+
+
+#Loading required package and Library
+```{r}
+library(dummies)
+library(tibble)
+library(dplyr)
+library(ggplot2)
+library(rpart)
+```
+
+#Read the train and test file
+```{r}
+ptrain<- read.csv("C:/Manipal Learning/machine learning/Assignment2/train.csv")
+ptest<- read.csv("C:/Manipal Learning/machine learning/Assignment2/test.csv")
+```
+##Display the Missing values and the column names for Train and test data
+```{r}
+memory.limit(size = 10000)
+```
+```{r}
+library(knitr)
+missingtrain <-as.data.frame(apply(ptrain,2,function(x){length(which(x==(-1)))}))
+kable(missingtrain,col.names=c("Missing train data"))
+missingtest <-as.data.frame(apply(ptest,2,function(x){length(which(x==(-1)))}))
+kable(missingtest,col.names=c("Missing test data")) 
+```
+
+#structure and Dimension of train data
+```{r}
+str(ptrain)
+dim(ptrain)
+```
+
+# adding target column to test data
+```{r}
+ptest <- add_column(ptest, target = 0, .after = 1)
+```
+
+#structure and Dimension of test data
+```{r}
+str(ptest)
+dim(ptest)
+```
+
+#combine the train and test dataset
+```{r}
+combi <- rbind(ptrain,ptest)
+dim(combi)
+```
+
+#checking for missing values
+```{r}
+sapply(combi, function(x) sum(is.na(x)))
+```
+#There is no missing values. In this dataset missing values are in the form -1 value
+
+#checking for -1 values
+```{r}
+com<-sapply(sign(combi), function(x) table(factor(x, levels=c(-1))))
+com1<-data.frame(com)
+com
+```
+
+#Plotting the proportion of -1 values
+```{r}
+data.frame(feature = names(combi),per_miss = sapply(combi, function(x) { sum(x == - 1) / length(x) })) %>% ggplot(aes(x = reorder(feature, -per_miss), y = per_miss)) + geom_bar(stat = 'identity', color = 'white', fill = '#5a64cd') + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + labs(x = '', y = '% missing', title = 'Missing Values by Feature') + scale_y_continuous(labels = scales::percent)
+```
+
+##PCA analysis
+
+PCA can be applied only on numerical data. Therefore, if the data has categorical variables they must be converted to numerical. Also,the basic data cleaning prior to implementing this technique. First, quickly finish with initial data loading and cleaning steps:
+
+#remove the column which have greater than 45% (-1)values
+```{r}
+drop <- c("ps_car_03_cat" , "ps_car_05_cat")
+combinew = combi [, !(names(combi)%in% drop)]
+```
+
+#impute missing values with mean and median
+```{r}
+combinew$ps_reg_03[combinew$ps_reg_03 == -1] <- round(mean(combinew$ps_reg_03, na.rm = TRUE))
+
+combinew$ps_car_14[combinew$ps_car_14 == -1] <-round(mean(combinew$ps_car_14, na.rm = TRUE))
+
+combinew$ps_car_12[combinew$ps_car_12 == -1] <-round(mean(combinew$ps_car_12, na.rm = TRUE))
+
+combinew$ps_car_11[combinew$ps_car_11 == -1] <-round(median(combinew$ps_car_11, na.rm = TRUE))
+```
+#Checking the column names 
+```{r}
+colnames(combinew)
+```
+Till here, we've imputed missing values. Now we are left with removing the dependent (response) variable and other identifier variables( if any). 
+
+#remove the dependent and identifier variables
+```{r}
+drop <- c("id" , "target")
+combinew1 = combinew [, !(names(combinew)%in% drop)]
+```
+
+Since PCA works on numeric variables, let's see if we have any variable other than numeric.
+
+#Structure of the dataset after cleaning and imputation
+```{r}
+str(combinew1)
+dim(combinew1)
+```
+
+#create a dummy data frame for categorical variable
+```{r}
+memory.limit(size = 15000)
+combi_safe_data <- dummy.data.frame(combinew1, names = c("ps_ind_02_cat","ps_ind_04_cat","ps_ind_05_cat","ps_car_01_cat","ps_car_02_cat", "ps_car_04_cat" ,"ps_car_06_cat",  "ps_car_07_cat","ps_car_08_cat", "ps_car_09_cat" ,"ps_car_10_cat","ps_car_11_cat"))
+```
+
+```{r}
+dim(combi_safe_data)
+```
+#divide the  dataset into train and test
+```{r}
+pca.train <- combi_safe_data[1:nrow(ptrain),]
+pca.test <- combi_safe_data[-(1:nrow(ptrain)),]
+```
+
+#principal component analysis
+```{r}
+prin_pca <- prcomp(pca.train, scale. = T)
+```
+```{r}
+names(prin_pca)
+```
+#The prcomp() function results in 5 useful measures:
+
+#1. center and scale refers to respective mean and standard deviation of the variables that are used for normalization prior to implementing PCA
+
+#outputs the mean of variables
+```{r}
+prin_pca$center
+```
+#outputs the standard deviation of variables
+```{r}
+prin_pca$scale
+```
+#2. The rotation measure provides the principal component loading. Each column of rotation matrix contains the principal component loading vector. This is the most important measure we should be interested in.
+
+```{r}
+prin_pca$rotation
+```
+#This returns 221 principal components loadings.Look at first 5 principal components and first 10 rows.
+
+```{r}
+prin_pca$rotation[1:10,1:5]
+dim(prin_pca$x)
+```
+The matrix x has the principal component score vectors in a 595212 × 221 dimension
+#plot the resultant principal components.
+```{r}
+biplot(prin_pca, scale = 0)
+```
+
+#compute standard deviation of each principal component
+```{r}
+std_dev <- prin_pca$sdev
+```
+#compute variance
+```{r}
+prin_var <- std_dev^2
+```
+
+#check variance of first 10 components
+```{r}
+prin_var[1:10]
+```
+#proportion of variance explained
+```{r}
+prop_var<- prin_var/sum(prin_var)
+prop_var[1:10]
+```
+#scree plot
+```{r}
+plot(prop_var, xlab = "Principal Component",ylab = "Proportion of Variance Explained",type = "b")
+```
+#cumulative scree plot
+```{r}
+plot(cumsum(prop_var), xlab = "Principal Component",ylab = " Cummulative Proportion of Variance Explained",type = "b")
+```
+## Predictive Modeling with PCA Components ##
+
+#add a training set with principal components
+```{r}
+p_train <- data.frame(target = ptrain$target, prin_pca$x)
+```
+
+#we are interested in first 30 PCAs
+```{r}
+p_train <- p_train[,1:31]
+```
+#Decision tree
+```{r}
+library(rpart)
+rpart.model <- rpart(target ~ .,data = p_train, method = "anova")
+rpart.model
+```
+#transform test into PCA
+```{r}
+p_test <- predict(prin_pca, newdata = pca.test)
+p_test <- as.data.frame(p_test)
+```
+#select the first 30 components
+```{r}
+p_test <- p_test[,1:31]
+```
+# prediction on test data
+```{r}
+rpart.pred <- predict(rpart.model, p_test)
+```
+```{r}
+p_test$target<- ptest$target
+```
+# cofusion matrix 
+```{r}
+confusionmatrix <-table(pred=rpart.pred, actual = p_test$target)
+confusionmatrix
+```
+#Checking accuracy of the model
+```{r}
+accuracy <-sum(diag(confusionmatrix))/sum(confusionmatrix)
+accuracy
+```
+
+#cross validate the model
+```{r}
+library(gmodels)
+CrossTable(p_test$target, rpart.pred,
+           prop.chisq = FALSE, prop.t = FALSE, prop.r = FALSE,
+           dnn = c('actual default', 'predicted default'))
+```
+
+
+
+## Logistic Regression ##
+
+Any variable name ending in _cat is an unordered categorical variable and that everything ending in _bin is a binary variable. Evereything else is considered to be continous. We will want to turn the categorical features into factor variables and then perform dummy variable encoding. 
+
+
+```{r}
+# collect the categorical variable names
+cat_var <- names(combi)[grepl('_cat$', names(combi))]
+# convert categorical features to factors
+combi <- combi %>%mutate_at(.vars = cat_var, .funs = as.factor)
+combi <- model.matrix(~ . - 1, data = combi)
+```
+# set seed for reproducibility
+```{r}
+library(caret)
+set.seed(123)
+```
+We want a test set with which to build our ROC curve and test the accuracy of our model. Here I split the data, making the training data only 20% of the total observations to cut down on the model training time
+
+# making a train index and split the data according to the train index
+```{r}
+train_index <- sample(c(TRUE, FALSE), replace = TRUE, size = nrow(combi), prob = c(0.2, 0.8))
+ training <- as.data.frame(combi[train_index, ])
+ testing <- as.data.frame(combi[!train_index, ])
+```
+When running logistic regression on larger data sets where we've done a lot of factor encoding we may run into issues with linear dependence among the features. If we try to fit a logistic regression where this is the case, we will get a rank-deficient fit. To overcome this, I use the findLinearCombos function. Here I run the function and then remove the features as suggested in the remove element of the resulting list.
+```{r}
+# find any linear combos in features
+lin_comb <- findLinearCombos(training)
+
+# take set difference of feature names and linear combos
+d <- setdiff(seq(1:ncol(training)), lin_comb$remove)
+
+# remove linear combo columns
+training<- training[, d]
+```
+ps_ind_02_cat4 shows NA values so, I have remove the column for now.
+
+
+```{r}
+ training <- training[, setdiff(names(training), 'ps_ind_02_cat4')]
+```
+# estimate logistic regression model on training data
+```{r}
+ model1<- glm(as.factor(target)~.-id, family = binomial(link = 'logit'), data = training)
+summary(model1)
+```
+```{r}
+  model2<- glm(as.factor(target)~ -id+ps_ind_03+ps_ind_05_cat0+ps_ind_05_cat1+ps_ind_05_cat3+ ps_ind_05_cat5+ps_ind_05_cat6+ps_ind_07_bin+ps_ind_08_bin+ps_ind_15+ps_ind_16_bin+ ps_ind_17_bin + ps_reg_01 + ps_reg_02 +ps_car_06_cat1 +ps_car_06_cat4+ ps_car_06_cat14+ps_car_04_cat8 +ps_car_04_cat9+ ps_car_07_cat0 + ps_car_11_cat31+ps_car_11_cat66+ ps_car_11_cat69 + ps_car_13+ ps_car_12 , data = training, family = binomial(link = 'logit'))
+summary(model2)
+```
+#model training and prediction
+```{r}
+preds <- predict(model2, newdata = testing, type = "response")
+```
+# plot histogram of predictions
+```{r}
+ data.frame(preds = preds) %>%
+ ggplot(aes(x = preds)) + 
+ geom_histogram(bins = 50, fill = 'grey50') +
+ labs(title = 'Histogram of Predictions') +
+ theme_bw()
+```
+# print range and median of predictions
+```{r}
+print(round(range(preds),2))
+print(median(preds))
+```
+
+#checking the Confusion matrix and Accuracy
+```{r}
+conf_safe <- table(testing$target,preds>0.5 )
+conf_safe
+ 
+accuracy_safe <- sum(diag(conf_safe))/sum(conf_safe)
+accuracy_safe
+```
+#Plotting ROC Curve
+```{r}
+pr<- prediction(preds, testing$target)
+perf <- roc(pr,measure = "tpr",x.measure = "fpr")
+plot(perf)
+```
